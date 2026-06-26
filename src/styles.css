@@ -6,7 +6,7 @@
 
 /* ---- Theme defaults (OLED) — overwritten at runtime by applyTheme ---- */
 :root {
-  --bg: #000000;
+  --bg: var(--yume-surface-0);
   --bg-elev: #0a0a0b;
   --bg-elev-2: #121214;
   --bg-hover: #1a1a1d;
@@ -21,6 +21,7 @@
   --accent-hover: #929fff;
   --accent-soft: rgba(124, 140, 255, 0.14);
   --accent-text: #aeb6ff;
+  --on-accent: #ffffff;
   --success: #3fd17e;
   --warn: #ffbf57;
   --error: #ff5c6c;
@@ -990,7 +991,7 @@ select {
 }
 .prompt-input__btn--send {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .prompt-input__btn--send:hover {
   background: var(--accent-hover);
@@ -1429,7 +1430,7 @@ select {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--yume-overlay-scrim);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: flex-start;
@@ -1552,7 +1553,7 @@ select {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
 }
 .theme-swatch__label {
   font-size: 12px;
@@ -1598,7 +1599,7 @@ select {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--yume-text-primary);
   transition: transform 0.16s ease;
 }
 .switch.is-on .switch__thumb {
@@ -1866,7 +1867,7 @@ kbd.settings__kbd {
   padding: 11px 20px;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 550;
   transition: background 0.12s;
 }
@@ -2233,8 +2234,8 @@ kbd.settings__kbd {
   color: var(--tool);
 }
 .tool-card__pre--live {
-  background: #07090c;
-  color: #cfe8ff;
+  background: var(--yume-terminal-bg);
+  color: var(--yume-text-primary);
   max-height: 220px;
   overflow: auto;
 }
@@ -2285,7 +2286,7 @@ kbd.settings__kbd {
   padding: 7px 13px;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12.5px;
   font-weight: 550;
 }

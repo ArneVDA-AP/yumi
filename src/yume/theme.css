@@ -1,0 +1,164 @@
+/* =============================================================================
+   Yume Design System — yumi integration theme
+   Drop this file into yumi and import it once (see INTEGRATION.md).
+
+   USAGE:
+     In src/main.tsx (already imports ./styles.css):
+       import '../path/to/theme.css';        // if placed under src/
+     OR in src/styles.css, at the very top:
+       @import './theme.css';
+
+   All custom properties are prefixed --yume-* (core) or use the namespaced
+   token names to avoid collisions with yumi's existing --bg, --accent, etc.
+   A companion [data-theme="yume"] block maps yumi's runtime vars to the Yume
+   palette so applyTheme('yume') or themes.ts works cleanly.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   1. Yume raw tokens (always available, regardless of active theme)
+   --------------------------------------------------------------------------- */
+:root {
+  /* -- Core (exact, from Yume theme editor) --------------------------------- */
+  --yume-background:  #050505;   /* "background"                               */
+  --yume-foreground:  #f0f0f0;   /* "foreground"                               */
+  --yume-accent:      #b8fd80;   /* "accent"  — phosphor lime                  */
+  --yume-positive:    #83efbb;   /* "positive" — mint                          */
+  --yume-negative:    #ea637a;   /* "negative" — coral                         */
+
+  /* -- Surface ramp (derived, sampled-aligned) ------------------------------ */
+  --yume-surface-0:   #050505;   /* root · titlebar · settings · modal base   */
+  --yume-surface-1:   #0e0e0e;   /* canvas · transcript                        */
+  --yume-surface-2:   #161616;   /* raised: cards, message blocks              */
+  --yume-surface-3:   #1c1c1c;   /* inputs · composer                          */
+  --yume-surface-4:   #242424;
+  --yume-surface-5:   #2c2c2c;
+  --yume-surface-6:   #343434;
+  --yume-terminal-bg: #000000;   /* code blocks · terminal panel               */
+
+  /* -- Text ----------------------------------------------------------------- */
+  --yume-text-primary:   #f0f0f0;   /* body / prose          16.9:1 on canvas  */
+  --yume-text-secondary: #b4b4b4;   /* secondary labels       9.3:1 on canvas  */
+  --yume-text-muted:     #808080;   /* meta / hints / placeholders             */
+  --yume-text-inverse:   #050505;   /* on accent / positive fills              */
+
+  /* -- Borders -------------------------------------------------------------- */
+  --yume-border-subtle: #282828;
+  --yume-border-strong: #343434;
+  --yume-border-focus:  #b8fd80;   /* focus ring = accent                      */
+
+  /* -- Semantic ------------------------------------------------------------- */
+  --yume-semantic-accent:    #b8fd80;
+  --yume-semantic-positive:  #83efbb;
+  --yume-semantic-negative:  #ea637a;
+  --yume-semantic-warning:   #e6c26a;   /* modified · attention (derived amber) */
+  --yume-semantic-info:      #7aa8d6;   /* links · types       (derived blue)   */
+
+  --yume-accent-contrast:  #050505;              /* text on accent fills       */
+  --yume-selection-bg:     rgba(184, 253, 128, 0.18);
+  --yume-selection-row:    #1f2a12;              /* solid accent-tinted row     */
+  --yume-overlay-scrim:    rgba(0, 0, 0, 0.55);
+  --yume-hover:            rgba(240, 240, 240, 0.05);
+  --yume-hover-strong:     rgba(240, 240, 240, 0.10);
+  --yume-scrollbar-thumb:  rgba(240, 240, 240, 0.16);
+
+  /* -- Git ------------------------------------------------------------------ */
+  --yume-git-added:     #83efbb;
+  --yume-git-modified:  #e6c26a;
+  --yume-git-deleted:   #ea637a;
+  --yume-git-untracked: #808080;
+  --yume-git-renamed:   #c884b8;
+
+  /* -- Agent identity (space-separated channels for color-mix/rgb()) -------- */
+  --yume-agent-rgb: 184 253 128;
+
+  /* -- Typography (Yume is fully monospace) --------------------------------- */
+  --yume-font-mono: "Fira Code", ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --yume-font-sans: "Fira Code", ui-monospace, "Cascadia Code", monospace;
+  --yume-font-size:   12px;
+  --yume-line-height: 1.2;
+
+  --yume-fs-xs:   10px;
+  --yume-fs-sm:   11px;
+  --yume-fs-base: 12px;
+  --yume-fs-md:   13px;
+  --yume-fs-lg:   15px;
+  --yume-fs-xl:   18px;
+
+  --yume-fw-regular: 400;
+  --yume-fw-medium:  500;
+  --yume-fw-bold:    700;
+
+  /* -- Radii ---------------------------------------------------------------- */
+  --yume-radius-xs:  3px;   /* badges · chips · count pills  */
+  --yume-radius-sm:  5px;   /* buttons · inputs · tabs        */
+  --yume-radius-md:  7px;   /* composer · popovers · cards    */
+  --yume-radius-lg: 10px;   /* modals                         */
+
+  /* -- Spacing (4px base grid) ---------------------------------------------- */
+  --yume-space-1:  4px;
+  --yume-space-2:  8px;
+  --yume-space-3: 12px;
+  --yume-space-4: 16px;
+  --yume-space-5: 24px;
+  --yume-space-6: 32px;
+
+  /* -- Elevation ------------------------------------------------------------ */
+  --yume-shadow-popover: 0 6px 24px rgba(0, 0, 0, 0.6);
+  --yume-shadow-focus:   0 0 0 1px var(--yume-accent), 0 0 0 4px rgba(184, 253, 128, 0.20);
+}
+
+/* ---------------------------------------------------------------------------
+   2. "yume" theme preset — maps yumi's runtime CSS vars to the Yume palette.
+
+   Add "yume" as a ThemeName in src/lib/themes.ts and call applyTheme('yume')
+   to activate. Alternatively, set <html data-theme="yume"> directly.
+
+   This block is self-contained: it does NOT depend on yumi's other themes.
+   --------------------------------------------------------------------------- */
+[data-theme="yume"] {
+  /* -- Background surfaces -------------------------------------------------- */
+  --bg:        #050505;   /* --yume-surface-0          */
+  --bg-elev:   #0e0e0e;   /* --yume-surface-1          */
+  --bg-elev-2: #161616;   /* --yume-surface-2          */
+  --bg-hover:  var(--yume-hover);       /* rgba(240,240,240,0.05)  */
+  --bg-active: var(--yume-hover-strong);/* rgba(240,240,240,0.10)  */
+  --surface:   #0e0e0e;
+
+  /* -- Borders -------------------------------------------------------------- */
+  --border:        var(--yume-border-subtle);  /* #282828  */
+  --border-strong: var(--yume-border-strong);  /* #343434  */
+
+  /* -- Text ----------------------------------------------------------------- */
+  --text:       var(--yume-text-primary);    /* #f0f0f0  */
+  --text-dim:   var(--yume-text-secondary);  /* #b4b4b4  */
+  --text-faint: var(--yume-text-muted);      /* #808080  */
+
+  /* -- Accent --------------------------------------------------------------- */
+  --accent:       var(--yume-accent);         /* #b8fd80 phosphor lime   */
+  --accent-hover: color-mix(in srgb, var(--yume-accent) 80%, #ffffff);
+  --accent-soft:  var(--yume-selection-bg);   /* rgba(184,253,128,0.18) */
+  --accent-text:  var(--yume-accent);         /* lime on dark is legible */
+
+  /* -- Status --------------------------------------------------------------- */
+  --success:  var(--yume-positive);           /* #83efbb mint            */
+  --warn:     var(--yume-semantic-warning);   /* #e6c26a amber           */
+  --error:    var(--yume-negative);           /* #ea637a coral           */
+
+  /* -- Semantic extras ------------------------------------------------------ */
+  --thinking:      var(--yume-semantic-info); /* #7aa8d6 blue  */
+  --thinking-soft: rgba(122, 168, 214, 0.10);
+  --tool:          var(--yume-positive);      /* #83efbb mint  */
+  --tool-soft:     rgba(131, 239, 187, 0.10);
+
+  /* -- Surfaces -------------------------------------------------------------- */
+  --user-bubble: var(--yume-surface-2);       /* #161616  */
+  --code-bg:     var(--yume-terminal-bg);     /* #000000  */
+  --scrollbar:   var(--yume-scrollbar-thumb);
+  --shadow:      var(--yume-shadow-popover);
+
+  /* -- Typography ----------------------------------------------------------- */
+  --font-mono: var(--yume-font-mono);
+  --font-sans: var(--yume-font-sans);   /* Yume uses Fira Code for both */
+
+  color-scheme: dark;
+}

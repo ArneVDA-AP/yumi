@@ -4,7 +4,9 @@
 // borders. Designed to be a genuinely pleasant daily-driver dark UI.
 // ============================================================================
 
-export type ThemeName = "oled" | "dark" | "dim" | "light" | "nord" | "rose";
+import { yumiThemeVars } from "../yume/tokens";
+
+export type ThemeName = "oled" | "dark" | "dim" | "light" | "nord" | "rose" | "yume";
 
 export interface ThemeVars {
   [cssVar: string]: string;
@@ -50,6 +52,7 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#141417",
       "--code-bg": "#0d0d10",
       "--scrollbar": "#26262c",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 30px rgba(0,0,0,0.6)",
     },
   },
@@ -83,6 +86,7 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#1f1f26",
       "--code-bg": "#131318",
       "--scrollbar": "#33333c",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 30px rgba(0,0,0,0.55)",
     },
   },
@@ -116,6 +120,7 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#2b2f39",
       "--code-bg": "#1d2027",
       "--scrollbar": "#3d4250",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 30px rgba(0,0,0,0.45)",
     },
   },
@@ -149,6 +154,7 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#eef0f8",
       "--code-bg": "#f4f4f8",
       "--scrollbar": "#cfcfda",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 28px rgba(20,20,40,0.12)",
     },
   },
@@ -182,6 +188,7 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#3b4252",
       "--code-bg": "#2b313c",
       "--scrollbar": "#4c566a",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 30px rgba(0,0,0,0.4)",
     },
   },
@@ -215,7 +222,25 @@ const themes: Record<ThemeName, ThemeDef> = {
       "--user-bubble": "#26233a",
       "--code-bg": "#1c1a2b",
       "--scrollbar": "#403c56",
+      "--on-accent": "#ffffff",
       "--shadow": "0 8px 30px rgba(0,0,0,0.45)",
+    },
+  },
+  yume: {
+    name: "yume",
+    label: "Yume",
+    dark: true,
+    // Pre-built runtime-var mapping from the Yume design system (src/yume/tokens.ts).
+    vars: {
+      ...yumiThemeVars,
+      // Yume's lime accent needs a dark foreground on filled controls; the other
+      // themes use white. Set on every theme so applyTheme can't leave a stale
+      // value when switching away from Yume.
+      "--on-accent": "#050505",
+      // Code/mono areas adopt Fira Code under Yume. Set inline here so it wins
+      // over the styles.css :root --font-mono default without touching the other
+      // themes (keeps body font as Inter per the chosen default).
+      "--font-mono": "var(--yume-font-mono)",
     },
   },
 };

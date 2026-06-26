@@ -44,8 +44,15 @@ reads stdout line-by-line, parses each JSON line into a typed `ClaudeEvent`
 messages (`src/lib/streamParse.ts`, `src/lib/store.ts`). The spawned env is
 sanitized so a parent Claude Code session never leaks into the child, and the
 turn finalizes on `end_turn` so the UI stays responsive even when post-turn
-hooks delay the final `result`. See **PARITY.md** for the full feature matrix
-and the reliability notes.
+hooks delay the final `result`.
+
+**Multi-provider** drives the *same* `claude` binary for every provider: a
+non-Claude provider is realized by pointing it at a router
+(claude-code-router / LiteLLM / OpenRouter) via `ANTHROPIC_BASE_URL`
+(`settings.routerBaseUrl`) — the stream-json parser never changes. The bundled
+`.cjs` sidecars are declared as Tauri `resources` and resolved at runtime via
+`resource_dir()` (dev-layout ancestor-walk as fallback). See **PARITY.md** for
+the full feature matrix and the reliability notes.
 
 ## Build & run
 
@@ -66,7 +73,7 @@ crate uses `[lib] crate-type = ["rlib"]`.
 ## Test
 
 ```bash
-cd src-tauri && cargo test                       # parser + registry units (23)
+cd src-tauri && cargo test                       # parser/provider/db/guard/resources units (38)
 cd resources && node tests/mcp_server.test.mjs   # MCP JSON-RPC server (12)
 ```
 

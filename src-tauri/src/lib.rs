@@ -6,6 +6,7 @@
 
 mod crash_recovery;
 mod db;
+pub mod platform;
 mod state;
 
 // Background agents use the Tauri event + spawn path, excluded from `cargo test`.
@@ -31,8 +32,14 @@ pub fn run() {
     // Best-effort startup cleanup.
     crash_recovery::cleanup_stale_streams();
 
-    // Open the database (create ~/.yumi + tables if missing).
+    // Kill any spawned `claude` children if the host panics (not only on a clean
+    // registry tree-kill) — children are tracked in process::guard.
+    process::guard::install_panic_hook();
+
+    // Open the database (create ~/.yumi + tables if missing) and bound its growth
+    // for long-lived installs (keep newest 500 sessions; analytics ≤ 1 year).
     let db = db::Db::open().expect("failed to open yumi database");
+    let _ = db.prune(500, 365 * 24 * 60 * 60 * 1000, platform::now_millis());
     let app_state = AppState::new(db);
 
     tauri::Builder::default()
@@ -71,6 +78,13 @@ pub fn run() {
             agents::remove_agent,
             agents::agent_diff,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // On normal teardown, tree-kill any still-running spawned children so
+            // none are orphaned when the window closes mid-turn.
+            if let tauri::RunEvent::Exit = event {
+                process::guard::kill_all();
+            }
+        });
 }

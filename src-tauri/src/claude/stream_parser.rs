@@ -119,6 +119,21 @@ pub fn parse_line(line: &str) -> Vec<ClaudeEvent> {
         Err(_) => return vec![ClaudeEvent::Raw { line: line.to_string() }],
     };
 
+    // Subagent isolation. Lines emitted by an in-stream subagent (the Task
+    // tool's child) carry a non-null top-level `parent_tool_use_id`. They must
+    // not reach the main turn's UI: a subagent's `message_delta`/`end_turn`
+    // would otherwise prematurely finalize the main turn, and its text/tool
+    // lines would pollute the main message. Keep them non-lossy as `raw`. The
+    // main turn (parent_tool_use_id null/absent) still renders the Task
+    // `tool_use` card and its `tool_result` normally.
+    if value
+        .get("parent_tool_use_id")
+        .and_then(|v| v.as_str())
+        .is_some()
+    {
+        return vec![ClaudeEvent::Raw { line: line.to_string() }];
+    }
+
     let kind = value.get("type").and_then(|t| t.as_str());
 
     match kind {
@@ -261,8 +276,12 @@ fn parse_user(value: &Value) -> Vec<ClaudeEvent> {
     events
 }
 
-/// tool_result `content` may be a plain string or an array of content blocks
-/// (`[{type:"text", text:"..."}]`). Flatten either form to a single string.
+/// tool_result `content` is polymorphic across tools/CLI versions:
+///   - a plain string,
+///   - an array of content blocks (`[{type:"text", text:"..."}]`),
+///   - an object wrapper (`{content: ...}`, `{output: ...}`, `{text: ...}`).
+/// Flatten any of these to a single string; otherwise the card renders blank
+/// (the object form would dump raw JSON). Recurses for the object/array forms.
 fn extract_tool_result_content(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
@@ -277,6 +296,13 @@ fn extract_tool_result_content(content: Option<&Value>) -> String {
             }
             parts.join("")
         }
+        Some(Value::Object(map)) => {
+            let nested = ["content", "output", "text"]
+                .iter()
+                .find_map(|key| map.get(*key))
+                .map(|v| extract_tool_result_content(Some(v)));
+            nested.unwrap_or_else(|| Value::Object(map.clone()).to_string())
+        }
         Some(other) => other.to_string(),
         None => String::new(),
     }
@@ -289,6 +315,25 @@ fn parse_stream_event(value: &Value) -> Vec<ClaudeEvent> {
     };
 
     let event_type = event.get("type").and_then(|t| t.as_str());
+
+    // message_start carries the turn's INITIAL usage snapshot (input + cache
+    // tokens) as soon as the request begins — well before the answer is done.
+    // Surface it as a `Usage` event so the context/token bar fills live
+    // mid-stream instead of only at end-of-turn. The real context occupancy is
+    // dominated by the cache tokens (a resumed turn replays the whole
+    // conversation as cache_read), so all four counters are forwarded.
+    if event_type == Some("message_start") {
+        if let Some(usage) = event.get("message").and_then(|m| m.get("usage")) {
+            let g = |k: &str| usage.get(k).and_then(|v| v.as_u64());
+            return vec![ClaudeEvent::Usage {
+                input_tokens: g("input_tokens"),
+                output_tokens: g("output_tokens"),
+                cache_read: g("cache_read_input_tokens"),
+                cache_creation: g("cache_creation_input_tokens"),
+            }];
+        }
+        return vec![ClaudeEvent::Raw { line: value.to_string() }];
+    }
 
     // message_delta carries the turn's final stop_reason + a usage snapshot.
     // A terminal stop_reason (anything but tool_use/pause_turn, which signal the
@@ -639,5 +684,89 @@ mod tests {
         assert!(json.contains("\"isError\":true"));
         assert!(json.contains("\"durationMs\":141"));
         assert!(json.contains("\"totalCostUsd\":0.0"));
+    }
+
+    // ---- §2.2 live token bar: message_start surfaces initial usage ----
+    #[test]
+    fn message_start_surfaces_initial_usage_live() {
+        // Real shape captured from `claude --output-format stream-json`.
+        let line = r#"{"type":"stream_event","parent_tool_use_id":null,"session_id":"s","event":{"type":"message_start","message":{"usage":{"input_tokens":10,"cache_creation_input_tokens":13408,"cache_read_input_tokens":20286,"output_tokens":3}}}}"#;
+        let events = parse_line(line);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ClaudeEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+            } => {
+                assert_eq!(*input_tokens, Some(10));
+                assert_eq!(*output_tokens, Some(3));
+                assert_eq!(*cache_read, Some(20286));
+                assert_eq!(*cache_creation, Some(13408));
+            }
+            other => panic!("expected Usage, got {:?}", other),
+        }
+    }
+
+    // ---- §1.3(b) subagent isolation via top-level parent_tool_use_id ----
+    #[test]
+    fn subagent_message_delta_does_not_finalize_main_turn() {
+        // A subagent's end_turn must NOT become a TurnDone (it would prematurely
+        // finalize the MAIN turn). Non-null parent_tool_use_id → isolated as raw.
+        let line = r#"{"type":"stream_event","parent_tool_use_id":"toolu_sub","session_id":"s","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":50}}}"#;
+        let events = parse_line(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ClaudeEvent::Raw { .. }));
+    }
+
+    #[test]
+    fn subagent_text_delta_is_isolated_as_raw() {
+        let line = r#"{"type":"stream_event","parent_tool_use_id":"toolu_sub","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"subagent chatter"}}}"#;
+        let events = parse_line(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ClaudeEvent::Raw { .. }));
+    }
+
+    #[test]
+    fn main_turn_null_parent_tool_use_id_is_not_isolated() {
+        // parent_tool_use_id present but null → still the main turn; end_turn finalizes.
+        let line = r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}}"#;
+        let events = parse_line(line);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ClaudeEvent::TurnDone { .. }));
+    }
+
+    // ---- §1.3(a) polymorphic tool_result.content (object wrappers) ----
+    #[test]
+    fn parses_tool_result_object_content() {
+        for (line, expected) in [
+            (r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":{"output":"hi out"}}]}}"#, "hi out"),
+            (r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":{"content":"hi content"}}]}}"#, "hi content"),
+            (r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":{"text":"hi text"}}]}}"#, "hi text"),
+            (r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":{"content":[{"type":"text","text":"nested"}]}}]}}"#, "nested"),
+        ] {
+            let events = parse_line(line);
+            assert_eq!(events.len(), 1);
+            match &events[0] {
+                ClaudeEvent::ToolResult { content, .. } => assert_eq!(content, expected),
+                other => panic!("expected ToolResult, got {:?}", other),
+            }
+        }
+    }
+
+    // ---- §1.3(c) /compact mints a new session id mid-stream ----
+    #[test]
+    fn second_system_init_surfaces_new_session_id() {
+        // After /compact, a fresh system/init carries a NEW session_id. The
+        // parser must surface each, so the store can rebind the resume id.
+        let first = parse_line(REAL_SYSTEM);
+        let second = parse_line(r#"{"type":"system","subtype":"init","session_id":"new-uuid-after-compact","model":"claude-haiku-4-5-20251001"}"#);
+        let id = |evs: &[ClaudeEvent]| match &evs[0] {
+            ClaudeEvent::System { claude_session_id, .. } => claude_session_id.clone(),
+            _ => None,
+        };
+        assert_eq!(id(&first).as_deref(), Some("9d31530c-5c3f-419e-9e2e-80830c149967"));
+        assert_eq!(id(&second).as_deref(), Some("new-uuid-after-compact"));
     }
 }

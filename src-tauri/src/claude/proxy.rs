@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 /// How long to wait for node to start accepting connections before giving up.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -51,15 +51,15 @@ impl ProxyState {
 
     /// Ensure the thinking proxy is running and *verified listening*; return its
     /// base URL, or `None` if it could not be confirmed. Idempotent: after the
-    /// first attempt, returns the cached result without re-launching.
-    pub fn ensure_running(&self) -> Option<String> {
+    /// first attempt, returns the cached result without re-launching. `script` is
+    /// the resolved path to `thinking-proxy.cjs` (see `resources::resolve_resource`).
+    pub fn ensure_running(&self, script: PathBuf) -> Option<String> {
         let mut guard = self.inner.lock().ok()?;
         if guard.attempted {
             return guard.handle.as_ref().map(|h| h.base_url.clone());
         }
         guard.attempted = true;
 
-        let script = locate_proxy_script()?;
         let port = find_free_port(18800, 18899)?;
 
         let mut cmd = Command::new("node");
@@ -82,6 +82,10 @@ impl ProxyState {
         // would point at a dead URL and hang forever. Confirm, or fall back.
         if probe_listening(port, PROBE_TIMEOUT) {
             let pid = child.id();
+            // Track the proxy in the process-wide guard so it dies WITH the host
+            // (on panic or normal exit), not only the spawned `claude` children —
+            // otherwise it leaks an idle node process per app run.
+            crate::process::guard::track(pid);
             let base_url = format!("http://127.0.0.1:{port}");
             guard.handle = Some(ProxyHandle {
                 base_url: base_url.clone(),
@@ -111,23 +115,6 @@ fn probe_listening(port: u16, timeout: Duration) -> bool {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-/// Find the bundled `thinking-proxy.cjs`. Walks up from the executable looking
-/// for a sibling `resources/thinking-proxy.cjs` — this resolves in both the
-/// bundled layout (resources beside the exe) and the `--no-bundle` dev build
-/// (exe at `src-tauri/target/debug/`, resources at the project root). A clone
-/// never depends on the commercial app's install dir.
-fn locate_proxy_script() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    for ancestor in exe_dir.ancestors() {
-        let candidate = ancestor.join("resources").join("thinking-proxy.cjs");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 /// Find a free TCP port in `[start, end]` by attempting to bind on loopback.

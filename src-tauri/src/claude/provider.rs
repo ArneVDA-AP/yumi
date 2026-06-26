@@ -1,15 +1,14 @@
 //! Multi-provider abstraction.
 //!
-//! Yumi drives a CLI subprocess and parses its `stream-json`. Claude is the
-//! fully-wired, verified path. The other providers mirror Yume's provider-shim
-//! design: Yumi selects the right binary and a best-effort arg shape, but they
-//! require that provider's CLI on PATH and emit their own output — only the
-//! Claude path is locally verified. The arg mappings for non-Claude providers
-//! are intentionally conservative and may need per-CLI-version adjustment.
-
-use std::path::PathBuf;
-
-use crate::claude::binary::locate_on_path_or_local;
+//! Every provider drives the SAME `claude` binary and its `stream-json` parser.
+//! Claude talks to the real Anthropic API; a non-Claude provider is realized by
+//! pointing that same `claude` process at a translating router via
+//! `ANTHROPIC_BASE_URL` (claude-code-router / LiteLLM / OpenRouter) — the
+//! convergent OSS pattern, and a tiny lift because Yumi already injects that env
+//! var for its thinking proxy. We deliberately do NOT spawn the `gemini`/`codex`
+//! binaries directly: those CLIs don't emit Claude `stream-json`, so that path
+//! could never actually render. A provider switch is just a respawn with a
+//! different base URL; the parser is untouched.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
@@ -41,61 +40,107 @@ impl Provider {
             Provider::Kiro => "kiro",
         }
     }
+}
 
-    /// Candidate executable names to probe on PATH / `~/.local/bin`.
-    fn binary_names(self) -> Vec<String> {
-        let stem = match self {
-            Provider::Claude => "claude",
-            Provider::Gemini => "gemini",
-            Provider::Codex => "codex",
-            Provider::Kiro => "kiro",
-        };
-        if cfg!(windows) {
-            vec![
-                format!("{stem}.exe"),
-                format!("{stem}.cmd"),
-                format!("{stem}.bat"),
-                stem.to_string(),
-            ]
-        } else {
-            vec![stem.to_string()]
+/// The provider-resolved plan for a turn: the `claude` CLI args (identical for
+/// every provider — the parser never changes) plus the optional
+/// `ANTHROPIC_BASE_URL` to point the process at a router.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnPlan {
+    pub args: Vec<String>,
+    /// `ANTHROPIC_BASE_URL` override: `None` for Claude (real API), `Some(router)`
+    /// for a routed provider.
+    pub base_url: Option<String>,
+}
+
+/// Build the `claude` CLI args + base-URL override for a turn.
+///
+/// ALL providers drive the `claude` binary and its `stream-json` parser; a
+/// non-Claude provider is realized purely by pointing that process at a
+/// translating router via `ANTHROPIC_BASE_URL`. Returns an error if a non-Claude
+/// provider is selected without a configured router URL — we never fake a
+/// working provider.
+pub fn build_spawn_plan(
+    provider: Provider,
+    prompt: &str,
+    model: &str,
+    resume: Option<&str>,
+    router_base_url: &str,
+) -> Result<SpawnPlan, String> {
+    let mut args: Vec<String> = vec![
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        "--include-partial-messages".into(),
+        "--dangerously-skip-permissions".into(),
+    ];
+    if let Some(r) = resume {
+        args.push("--resume".into());
+        args.push(r.into());
+    }
+    args.push("-p".into());
+    args.push(prompt.into());
+    args.push("--model".into());
+    args.push(model.into());
+
+    let base_url = if provider.is_claude() {
+        None
+    } else {
+        let url = router_base_url.trim();
+        if url.is_empty() {
+            return Err(format!(
+                "Provider '{}' needs a router: set Settings → Router base URL to a \
+                 claude-code-router / LiteLLM / OpenRouter endpoint that speaks the \
+                 Anthropic stream-json API.",
+                provider.id()
+            ));
         }
+        Some(url.to_string())
+    };
+
+    Ok(SpawnPlan { args, base_url })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_plan_has_no_base_url_and_streamjson_args() {
+        let plan = build_spawn_plan(Provider::Claude, "hi", "claude-opus-4-8", None, "").unwrap();
+        assert_eq!(plan.base_url, None);
+        assert!(plan.args.windows(2).any(|w| w == ["--output-format", "stream-json"]));
+        assert!(plan.args.windows(2).any(|w| w == ["--model", "claude-opus-4-8"]));
+        assert!(plan.args.contains(&"-p".to_string()));
     }
 
-    /// Locate this provider's CLI binary, or `None` if it isn't installed.
-    pub fn locate(self) -> Option<PathBuf> {
-        let names = self.binary_names();
-        locate_on_path_or_local(names.iter().map(|s| s.as_str()))
+    #[test]
+    fn claude_plan_includes_resume_when_present() {
+        let plan = build_spawn_plan(Provider::Claude, "hi", "m", Some("uuid-1"), "").unwrap();
+        assert!(plan.args.windows(2).any(|w| w == ["--resume", "uuid-1"]));
     }
 
-    /// Build the CLI args for a turn. `resume` is the provider session id to
-    /// resume (Claude only). Returns the full arg vector (excluding the binary).
-    pub fn build_args(self, prompt: &str, model: &str, resume: Option<&str>) -> Vec<String> {
-        match self {
-            Provider::Claude => {
-                let mut args = vec![
-                    "--output-format".into(),
-                    "stream-json".into(),
-                    "--verbose".into(),
-                    "--include-partial-messages".into(),
-                    "--dangerously-skip-permissions".into(),
-                ];
-                if let Some(r) = resume {
-                    args.push("--resume".into());
-                    args.push(r.into());
-                }
-                args.push("-p".into());
-                args.push(prompt.into());
-                args.push("--model".into());
-                args.push(model.into());
-                args
-            }
-            // Best-effort, unverified mappings for the other CLIs. They keep the
-            // model + prompt; output rendering depends on the CLI emitting
-            // claude-compatible stream-json (unknown lines are shown raw-safe).
-            Provider::Gemini => vec!["-m".into(), model.into(), "-p".into(), prompt.into()],
-            Provider::Codex => vec!["-m".into(), model.into(), prompt.into()],
-            Provider::Kiro => vec!["-m".into(), model.into(), prompt.into()],
+    #[test]
+    fn routed_provider_injects_base_url_with_identical_claude_args() {
+        let claude = build_spawn_plan(Provider::Claude, "hi", "m", None, "").unwrap();
+        let routed = build_spawn_plan(
+            Provider::Gemini,
+            "hi",
+            "m",
+            None,
+            "http://127.0.0.1:4000",
+        )
+        .unwrap();
+        // Same claude/stream-json args — only the base URL differs.
+        assert_eq!(routed.args, claude.args);
+        assert_eq!(routed.base_url.as_deref(), Some("http://127.0.0.1:4000"));
+    }
+
+    #[test]
+    fn routed_provider_without_router_is_an_error_not_a_fake() {
+        for p in [Provider::Gemini, Provider::Codex, Provider::Kiro] {
+            let err = build_spawn_plan(p, "hi", "m", None, "   ").unwrap_err();
+            assert!(err.contains("Router base URL"), "got: {err}");
         }
     }
 }

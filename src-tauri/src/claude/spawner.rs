@@ -7,13 +7,15 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::claude::provider::Provider;
+use crate::claude::binary::locate_claude;
+use crate::claude::provider::{build_spawn_plan, Provider};
+use crate::claude::resources::resolve_resource;
 use crate::claude::session::resume_arg;
 use crate::claude::stream_parser::{parse_line, ClaudeEvent};
 use crate::state::AppState;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 /// Spawn options sent from the frontend (matches `SpawnOpts` in types.ts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,10 @@ pub struct SpawnOpts {
     pub model: String,
     #[serde(default)]
     pub provider: Option<String>,
+    /// `ANTHROPIC_BASE_URL` for a routed (non-Claude) provider — a
+    /// claude-code-router / LiteLLM / OpenRouter endpoint. Empty/absent for Claude.
+    #[serde(default)]
+    pub router_base_url: Option<String>,
     #[serde(default)]
     pub resume_id: Option<String>,
     #[serde(default)]
@@ -37,32 +43,34 @@ pub struct SpawnOpts {
 /// Streaming happens on a background tokio task; events arrive via `app.emit`.
 pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, String> {
     let provider = Provider::from_id(opts.provider.as_deref());
-    let bin = provider.locate().ok_or_else(|| {
-        format!(
-            "{} binary not found on PATH or in %USERPROFILE%\\.local\\bin",
-            provider.id()
-        )
+
+    // Every provider drives the SAME `claude` binary + stream-json parser; a
+    // non-Claude provider is realized by pointing it at a router via
+    // ANTHROPIC_BASE_URL (see provider.rs / build_spawn_plan), not by spawning a
+    // foreign CLI that can't emit stream-json.
+    let bin = locate_claude().ok_or_else(|| {
+        "claude binary not found on PATH or in %USERPROFILE%\\.local\\bin".to_string()
     })?;
 
     let session_id = opts.session_id.clone();
 
-    // Build the provider's CLI args (Claude resumes via its session uuid; the
-    // other providers get a best-effort prompt+model shape — see provider.rs).
-    let resume = if provider.is_claude() {
-        resume_arg(opts.resume_id.as_deref())
-    } else {
-        None
-    };
-    let mut args = provider.build_args(&opts.prompt, &opts.model, resume.as_deref());
+    // Resolve the claude args + the optional router base URL for this provider.
+    // `--resume` replays this session's transcript to whatever ANTHROPIC_BASE_URL
+    // points at, so it works for routed providers too. A non-Claude provider with
+    // no configured router URL returns a clear error here (never a fake success).
+    let resume = resume_arg(opts.resume_id.as_deref());
+    let router_url = opts.router_base_url.clone().unwrap_or_default();
+    let plan = build_spawn_plan(provider, &opts.prompt, &opts.model, resume.as_deref(), &router_url)?;
+    let mut args = plan.args;
 
-    // BASH-MONITOR (Claude only, opt-in): register the bundled MCP bash server
-    // and force shell through it (disallow the built-in Bash) so command output
-    // streams to a file the monitor tails live. Gated behind the setting, so the
-    // default path stays the verified core chat.
-    let bash_monitor = provider.is_claude() && opts.bash_monitor.unwrap_or(false);
+    // BASH-MONITOR (opt-in): register the bundled MCP bash server and force shell
+    // through it (disallow the built-in Bash) so command output streams to a file
+    // the monitor tails live. Gated behind the setting, so the default path stays
+    // the verified core chat.
+    let bash_monitor = opts.bash_monitor.unwrap_or(false);
     let mut mcp_config_path: Option<std::path::PathBuf> = None;
     if bash_monitor {
-        if let Some(cfg) = write_bash_mcp_config(&session_id) {
+        if let Some(cfg) = write_bash_mcp_config(&app, &session_id) {
             args.push("--mcp-config".into());
             args.push(cfg.to_string_lossy().to_string());
             args.push("--disallowedTools".into());
@@ -71,10 +79,16 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
         }
     }
 
-    // Optionally launch the thinking proxy and point claude at it (Claude only).
-    let proxy_base_url = if provider.is_claude() && opts.thinking.unwrap_or(false) {
-        let state = app.state::<AppState>();
-        state.proxy.ensure_running()
+    // Pick the ANTHROPIC_BASE_URL to inject. A routed provider's router URL wins
+    // (plan.base_url is Some only for non-Claude providers); otherwise optionally
+    // launch the thinking proxy and point claude at it.
+    let base_url = if let Some(router) = plan.base_url {
+        Some(router)
+    } else if opts.thinking.unwrap_or(false) {
+        match resolve_resource(&app, "thinking-proxy.cjs") {
+            Some(script) => app.state::<AppState>().proxy.ensure_running(script),
+            None => None,
+        }
     } else {
         None
     };
@@ -129,11 +143,11 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
         .stderr(Stdio::piped())
         .env("CLAUDE_CODE_ENTRYPOINT", "yumi")
         // Stream file + session id for the MCP bash server / monitor. The names
-        // must match what `resources/yumi-mcp-bash.cjs` reads (YUMI_*, not YUME_*)
-        // — they were mismatched, so the path never lined up. (The MCP bash
-        // server isn't yet registered with the spawned claude, so nothing writes
-        // this file today; see PARITY "BASH-MONITOR". These are correct for when
-        // it is wired.)
+        // must match what `resources/yumi-mcp-bash.cjs` reads (YUMI_*, not YUME_*).
+        // When the bash monitor is on, the spawned claude IS given a
+        // `--mcp-config` registering that server (see above) and `--disallowedTools
+        // Bash`, so it routes shell through `mcp__yumi-bash__RunBash`, which writes
+        // this file for `spawn_monitor` to tail.
         .env(
             "YUMI_STREAM_FILE",
             std::env::temp_dir()
@@ -143,7 +157,7 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
         )
         .env("YUMI_SESSION_ID", &session_id);
 
-    if let Some(ref url) = proxy_base_url {
+    if let Some(ref url) = base_url {
         command.env("ANTHROPIC_BASE_URL", url);
     }
 
@@ -156,11 +170,13 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
         .spawn()
         .map_err(|e| format!("failed to spawn {}: {e}", provider.id()))?;
 
-    // Register PID for interrupt.
+    // Register PID for interrupt, and track it in the process-wide guard so it
+    // dies with the host even on a panic (not only on a clean tree-kill).
     let child_pid = child.id();
     if let Some(pid) = child_pid {
         let state = app.state::<AppState>();
         state.registry.register(&session_id, pid);
+        crate::process::guard::track(pid);
     }
 
     // BASH-MONITOR: tail this session's stream file and emit `bash-output` while
@@ -236,7 +252,7 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
                                     input_tokens,
                                     output_tokens,
                                     cost_opt.unwrap_or(0.0),
-                                    now_millis(),
+                                    crate::platform::now_millis(),
                                 );
                             }
                             if turn_finalized {
@@ -260,6 +276,26 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
                                     );
                                 }
                             }
+                        }
+
+                        // A `rate_limit_event` trails the `message_delta`/`end_turn`
+                        // that already finalized the UI (real order: end_turn →
+                        // rate_limit_event → result). Surface it REGARDLESS of
+                        // finalize so the rate-limit pills update live — gated on
+                        // THIS process still owning the session so a lingering turn
+                        // can't push onto a newer one. (Without this the pills never
+                        // light up, since the post-finalize drain below drops it.)
+                        if let ClaudeEvent::RateLimit { .. } = &event {
+                            let current = pid_opt.map_or(!turn_finalized, |pid| {
+                                app_clone.state::<AppState>().registry.is_current(&sid, pid)
+                            });
+                            if current {
+                                let _ = app_clone.emit(
+                                    "claude-event",
+                                    json!({ "sessionId": sid, "event": event }),
+                                );
+                            }
+                            continue;
                         }
 
                         // After finalize we keep draining stdout (so the lingering
@@ -329,6 +365,10 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
                 }
             }
         }
+        // This child has exited — drop it from the process-wide guard set.
+        if let Some(pid) = pid_opt {
+            crate::process::guard::untrack(pid);
+        }
 
         // If we already finalized (the normal path), the UI is done — don't emit
         // a late completion/error that could disturb a newer turn on this id.
@@ -375,8 +415,8 @@ pub async fn spawn_claude(app: AppHandle, opts: SpawnOpts) -> Result<String, Str
 /// server for this session (with its own session id + stream file), and reset
 /// the stream file so the monitor only tails THIS turn's output. Returns the
 /// config path, or `None` if the bundled script can't be found.
-fn write_bash_mcp_config(session_id: &str) -> Option<std::path::PathBuf> {
-    let script = locate_resource("yumi-mcp-bash.cjs")?;
+fn write_bash_mcp_config(app: &AppHandle, session_id: &str) -> Option<std::path::PathBuf> {
+    let script = resolve_resource(app, "yumi-mcp-bash.cjs")?;
     let stream_file = std::env::temp_dir().join(format!("yumi-bash-{session_id}.log"));
     let _ = std::fs::remove_file(&stream_file); // fresh per turn
 
@@ -397,19 +437,6 @@ fn write_bash_mcp_config(session_id: &str) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// Locate a bundled `resources/<name>` by walking up from the executable —
-/// resolves in both the bundled layout and the `--no-bundle` dev build.
-fn locate_resource(name: &str) -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    for ancestor in exe.parent()?.ancestors() {
-        let candidate = ancestor.join("resources").join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 /// Extract `(input_tokens, output_tokens)` from a result line's `usage` object.
 /// Missing/absent fields count as 0.
 fn result_tokens(usage: &Option<serde_json::Value>) -> (i64, i64) {
@@ -421,14 +448,4 @@ fn result_tokens(usage: &Option<serde_json::Value>) -> (i64, i64) {
             .unwrap_or(0)
     };
     (get("input_tokens"), get("output_tokens"))
-}
-
-/// Current wall-clock time in epoch milliseconds (the unit `analytics.created_at`
-/// is stored in; `get_analytics` groups by `created_at/1000`).
-fn now_millis() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }

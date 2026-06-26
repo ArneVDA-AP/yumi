@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 /// Thread-safe registry of active claude processes keyed by frontend sessionId.
 #[derive(Default)]

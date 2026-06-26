@@ -65,7 +65,7 @@ export interface Tab {
   streaming: boolean;
   activeAssistantId?: string | null;  // id of the in-flight assistant message
   draft: string;              // unsent input text
-  lastUsage?: { inputTokens?: number; outputTokens?: number };
+  lastUsage?: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheCreation?: number };
   error?: string | null;
   loaded: boolean;            // history loaded from db
   createdAt: number;
@@ -167,6 +167,25 @@ function baseName(p: string): string {
   const cleaned = p.replace(/[/\\]+$/, "");
   const seg = cleaned.split(/[/\\]/).pop();
   return seg || cleaned || "project";
+}
+
+/** Map a live in-stream `rate_limit_event` payload into UsageLimits. The CLI
+ *  emits `{ rate_limit_info: { status, resetsAt(epoch s), rateLimitType, … } }`.
+ *  It carries live status + reset time but NO percentage, so the pct fields stay
+ *  absent; `live:true` lights the pills up (vs the greyed "unavailable" default). */
+function parseRateLimit(raw: unknown): UsageLimits | null {
+  if (!raw || typeof raw !== "object") return null;
+  const info = (raw as { rate_limit_info?: Record<string, unknown> }).rate_limit_info;
+  if (!info || typeof info !== "object") return null;
+  const status = typeof info.status === "string" ? info.status : undefined;
+  const windowType = typeof info.rateLimitType === "string" ? info.rateLimitType : undefined;
+  const resetsAtEpoch = typeof info.resetsAt === "number" ? info.resetsAt : undefined;
+  return {
+    rateLimited: status != null && status !== "allowed",
+    live: true,
+    windowType,
+    resetsAt: resetsAtEpoch ? new Date(resetsAtEpoch * 1000).toISOString() : undefined,
+  };
 }
 
 /** Insert or replace an agent by id, newest first. */
@@ -327,6 +346,7 @@ export const useStore = create<StoreState>((set, get) => ({
         prompt: text,
         model: tab.model || settings.model,
         provider: settings.provider,
+        routerBaseUrl: settings.routerBaseUrl,
         resumeId: tab.claudeSessionId ?? null,
         thinking: settings.thinking,
         bashMonitor: settings.bashMonitor,
@@ -610,6 +630,13 @@ export const useStore = create<StoreState>((set, get) => ({
       if (res.usage) lastUsage = { ...lastUsage, ...res.usage };
       if (res.error) error = res.error;
 
+      // Wire the in-stream rate_limit_event into the (global) usage pills, live.
+      let nextUsage = s.usage;
+      if (res.rateLimit) {
+        const parsed = parseRateLimit(res.rateLimit);
+        if (parsed) nextUsage = { ...s.usage, ...parsed };
+      }
+
       if (res.message) {
         const idx = messages.findIndex((m) => m.id === res.message!.id);
         if (idx >= 0) {
@@ -645,7 +672,7 @@ export const useStore = create<StoreState>((set, get) => ({
             }
           : t,
       );
-      return { tabs };
+      return nextUsage === s.usage ? { tabs } : { tabs, usage: nextUsage };
     });
 
     // The `result` event marks the logical end of a turn — finalize the UI

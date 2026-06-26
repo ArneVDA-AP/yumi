@@ -204,6 +204,37 @@ impl Db {
         Ok(())
     }
 
+    /// Prune for long-lived installs so the DB can't grow without bound: keep
+    /// only the most-recently-updated `max_sessions` sessions (cascading their
+    /// messages) and drop analytics rows older than `max_analytics_age_ms`.
+    /// Best-effort, run once at startup. `now_ms` is epoch millis (injectable for
+    /// tests). Analytics are aged by time only — they're cost history the user
+    /// keeps independent of session retention.
+    pub fn prune(
+        &self,
+        max_sessions: i64,
+        max_analytics_age_ms: i64,
+        now_ms: i64,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // `LIMIT -1 OFFSET n` selects every row PAST the newest n.
+        conn.execute(
+            "DELETE FROM messages WHERE session_id IN (
+                 SELECT id FROM sessions ORDER BY updated_at DESC LIMIT -1 OFFSET ?1
+             )",
+            params![max_sessions],
+        )?;
+        conn.execute(
+            "DELETE FROM sessions WHERE id IN (
+                 SELECT id FROM sessions ORDER BY updated_at DESC LIMIT -1 OFFSET ?1
+             )",
+            params![max_sessions],
+        )?;
+        let cutoff = now_ms.saturating_sub(max_analytics_age_ms);
+        conn.execute("DELETE FROM analytics WHERE created_at < ?1", params![cutoff])?;
+        Ok(())
+    }
+
     // ---- analytics ----
 
     /// Record a usage row. Called from the spawner when a turn's `result` line is
@@ -351,6 +382,51 @@ mod tests {
 
         // by_date groups by UTC day → the two timestamps span two days.
         assert_eq!(a.by_date.len(), 2);
+    }
+
+    #[test]
+    fn prune_caps_sessions_and_ages_out_analytics() {
+        let db = Db::open_in_memory().unwrap();
+        // 5 sessions with increasing updated_at (s4 newest).
+        for i in 0..5i64 {
+            let id = format!("s{i}");
+            let meta = SessionMeta {
+                id: id.clone(),
+                claude_session_id: None,
+                title: "t".into(),
+                cwd: "".into(),
+                model: "m".into(),
+                created_at: i,
+                updated_at: i,
+            };
+            let messages = vec![StoredMessage {
+                id: None,
+                session_id: id.clone(),
+                role: "user".into(),
+                content: "[]".into(),
+                created_at: i,
+            }];
+            db.save_session(&SessionDetail { meta, messages }).unwrap();
+        }
+        let now = 1_000_000_000i64;
+        db.record_analytics("s4", "m", 1, 1, 0.1, 1_000).unwrap(); // old → pruned
+        db.record_analytics("s4", "m", 1, 1, 0.1, now).unwrap(); // fresh → kept
+
+        // Keep newest 2 sessions; age out analytics older than 1 day.
+        db.prune(2, 86_400_000, now).unwrap();
+
+        let sessions = db.list_sessions().unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.id == "s4"));
+        assert!(sessions.iter().any(|s| s.id == "s3"));
+
+        // Pruned sessions' messages are gone; kept sessions' remain.
+        assert!(db.get_session("s0").is_err());
+        assert_eq!(db.get_session("s4").unwrap().messages.len(), 1);
+
+        // Only the fresh analytics row survives (one UTC day → one by_date entry).
+        let a = db.get_analytics().unwrap();
+        assert_eq!(a.by_date.len(), 1);
     }
 
     #[test]

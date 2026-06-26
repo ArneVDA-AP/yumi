@@ -1,9 +1,11 @@
 // Thin context-usage bar above the composer. Reads the active tab's last usage
-// and the auto-compact threshold from settings; purely presentational.
+// and the auto-compact threshold from settings; purely presentational. The
+// window is parametrized per active model (§2.3) and the bar fills live
+// mid-stream from the message_start usage snapshot (§2.2).
 
+import { contextWindowFor } from "../../lib/models";
 import { useActiveTab, useStore } from "../../lib/store";
 
-const CONTEXT_WINDOW = 200_000;
 const DANGER_PCT = 0.9;
 
 function formatK(n: number): string {
@@ -19,8 +21,17 @@ export default function TokenBar() {
   const threshold = useStore((s) => s.settings.autoCompactThreshold);
 
   const usage = tab?.lastUsage;
-  const used = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-  const ratio = Math.min(used / CONTEXT_WINDOW, 1);
+  const contextWindow = contextWindowFor(tab?.model);
+  // Real context occupancy = fresh input + cached context (read + creation) +
+  // this turn's output. Cache tokens DOMINATE a resumed conversation (the whole
+  // transcript replays as cache_read), so they must be counted or the bar reads
+  // near-zero on long sessions.
+  const used =
+    (usage?.inputTokens ?? 0) +
+    (usage?.cacheRead ?? 0) +
+    (usage?.cacheCreation ?? 0) +
+    (usage?.outputTokens ?? 0);
+  const ratio = Math.min(used / contextWindow, 1);
   const pct = Math.round(ratio * 100);
 
   let level = "";
@@ -38,7 +49,7 @@ export default function TokenBar() {
         />
       </div>
       <span className="token-bar__label">
-        {formatK(used)} / {formatK(CONTEXT_WINDOW)}
+        {formatK(used)} / {formatK(contextWindow)}
       </span>
       <span className="token-bar__pct">{pct}%</span>
     </div>

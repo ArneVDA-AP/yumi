@@ -67,10 +67,21 @@ export default function SettingsOverlay() {
             ))}
           </select>
           {provider.id !== "claude" && (
-            <p className="settings__note">
-              Requires the <code>{provider.id}</code> CLI on PATH. Claude is the verified path;
-              other providers are best-effort.
-            </p>
+            <>
+              <p className="settings__note">
+                Routed via <code>ANTHROPIC_BASE_URL</code> — set a router endpoint
+                (claude-code-router / LiteLLM / OpenRouter) that speaks the Anthropic
+                stream-json API. Without one, sending shows a clear error. Claude is the
+                verified path.
+              </p>
+              <input
+                type="text"
+                className="settings__select"
+                placeholder="http://127.0.0.1:4000  (router base URL)"
+                value={settings.routerBaseUrl}
+                onChange={(e) => void updateSettings({ routerBaseUrl: e.target.value })}
+              />
+            </>
           )}
         </section>
 

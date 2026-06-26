@@ -32,9 +32,10 @@ export interface ClaudeCost { sessionId: string; cost?: number; durationMs?: num
 export interface AgentEvent { agent: AgentInfo }
 
 // ---- Providers (multi-provider abstraction) ----
-// The backend selects the CLI binary + arg format per provider; only Claude is
-// locally verified — the others require their own CLI on PATH (arg mapping is
-// best-effort, mirroring Yume's provider-shim architecture).
+// Every provider drives the SAME `claude` binary + stream-json parser. Claude
+// talks to the real API; non-Claude providers are realized by pointing `claude`
+// at a router via ANTHROPIC_BASE_URL (settings.routerBaseUrl) — so they require
+// a configured router endpoint, not a foreign CLI.
 export type ProviderId = "claude" | "gemini" | "codex" | "kiro";
 
 export interface ProviderInfo {
@@ -53,9 +54,9 @@ export const PROVIDERS: ProviderInfo[] = [
       { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
     ],
   },
-  { id: "gemini", label: "Gemini (gemini CLI)", models: [{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" }, { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" }] },
-  { id: "codex", label: "GPT (codex CLI)", models: [{ value: "gpt-5", label: "GPT-5" }, { value: "o4-mini", label: "o4-mini" }] },
-  { id: "kiro", label: "Kiro (kiro CLI)", models: [{ value: "kiro-default", label: "Kiro (default)" }] },
+  { id: "gemini", label: "Gemini (via router)", models: [{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" }, { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" }] },
+  { id: "codex", label: "GPT (via router)", models: [{ value: "gpt-5", label: "GPT-5" }, { value: "o4-mini", label: "o4-mini" }] },
+  { id: "kiro", label: "Kiro (via router)", models: [{ value: "kiro-default", label: "Kiro (default)" }] },
 ];
 
 // ---- Spawn options ----
@@ -64,7 +65,8 @@ export interface SpawnOpts {
   cwd: string;
   prompt: string;
   model: string;
-  provider?: ProviderId;     // which CLI to drive (default "claude")
+  provider?: ProviderId;     // which provider to drive (default "claude")
+  routerBaseUrl?: string;    // ANTHROPIC_BASE_URL for a routed (non-Claude) provider
   resumeId?: string | null;  // real claude session uuid to --resume
   thinking?: boolean;        // route through thinking proxy
   bashMonitor?: boolean;     // route bash through the MCP server for live tail
@@ -73,6 +75,7 @@ export interface SpawnOpts {
 // ---- Settings ----
 export interface Settings {
   provider: ProviderId;
+  routerBaseUrl: string;     // ANTHROPIC_BASE_URL for routed (non-Claude) providers
   model: string;
   theme: string;             // 'oled' | 'dark' | 'light' | 'dim' | 'nord' | 'rose'
   vimMode: boolean;
@@ -84,6 +87,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: "claude",
+  routerBaseUrl: "",
   model: "claude-opus-4-8",
   theme: "oled",
   vimMode: false,
@@ -159,9 +163,13 @@ export interface DirEntry { name: string; path: string; isDir: boolean }
 
 export interface UsageLimits {
   rateLimited: boolean;
-  fiveHourPct?: number;   // 0..1 used
+  /** True only when backed by a real signal (a live in-stream rate_limit_event).
+   *  When false, the UI greys the pills as "usage data unavailable". */
+  live?: boolean;
+  windowType?: string;    // e.g. "five_hour" / "seven_day", from the live event
+  fiveHourPct?: number;   // 0..1 used (no reliable local source → usually absent)
   sevenDayPct?: number;
-  resetsAt?: string;
+  resetsAt?: string;      // ISO timestamp the active window resets
 }
 
 // ---- UI-side message model (built by the stream reducer) ----

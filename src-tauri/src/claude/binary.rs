@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 /// Locate the `claude` binary.
 ///
@@ -18,9 +18,8 @@ pub fn locate_claude() -> Option<PathBuf> {
 }
 
 /// Generic binary locator: probe each candidate name on PATH first, then in
-/// `%USERPROFILE%\.local\bin`. Returns the first hit. Used by `locate_claude`
-/// and the multi-provider abstraction (`provider.rs`).
-pub fn locate_on_path_or_local<'a>(names: impl Iterator<Item = &'a str> + Clone) -> Option<PathBuf> {
+/// `%USERPROFILE%\.local\bin`. Returns the first hit.
+pub(crate) fn locate_on_path_or_local<'a>(names: impl Iterator<Item = &'a str> + Clone) -> Option<PathBuf> {
     for name in names.clone() {
         if let Some(p) = which_on_path(name) {
             return Some(p);

@@ -5,7 +5,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 /// Matches `GitStatus` in types.ts.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

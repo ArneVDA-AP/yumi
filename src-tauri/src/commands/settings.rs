@@ -14,6 +14,10 @@ pub struct Settings {
     // before these fields existed still deserialize cleanly.
     #[serde(default = "default_provider")]
     pub provider: String,
+    /// `ANTHROPIC_BASE_URL` for routed (non-Claude) providers — a
+    /// claude-code-router / LiteLLM / OpenRouter endpoint. Empty = none configured.
+    #[serde(default)]
+    pub router_base_url: String,
     pub model: String,
     pub theme: String,
     pub vim_mode: bool,
@@ -33,6 +37,7 @@ impl Default for Settings {
         // Mirrors DEFAULT_SETTINGS in types.ts.
         Self {
             provider: default_provider(),
+            router_base_url: String::new(),
             model: "claude-opus-4-8".to_string(),
             theme: "oled".to_string(),
             vim_mode: false,

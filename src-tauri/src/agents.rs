@@ -25,7 +25,7 @@ use crate::process::registry::kill_process_tree;
 use crate::state::AppState;
 
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::platform::CREATE_NO_WINDOW;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,13 +128,6 @@ fn gen_id() -> String {
     format!("{:x}{:x}", n, c)
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 /// Run a synchronous git command in `cwd`. Ok(stdout) / Err(stderr|message).
 fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = std::process::Command::new("git");
@@ -196,7 +189,7 @@ pub async fn start_agent(
         model: model.clone(),
         status: "running".into(),
         detail: None,
-        created_at: now_millis(),
+        created_at: crate::platform::now_millis(),
     };
 
     // Require a git repo to isolate into.

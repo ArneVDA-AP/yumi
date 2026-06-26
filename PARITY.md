@@ -7,7 +7,7 @@ is **intentionally not cloned** (there is simply no gate).
 
 Legend: ✅ done & verified · 🟢 done (lighter verification) · 🟡 scoped/stub (labeled) · ⬜ intentionally omitted
 
-Last verified: 2026-06-25 against `claude` CLI in `%USERPROFILE%\.local\bin`, model `claude-opus-4-8` / `sonnet`.
+Last verified: 2026-06-26 (polished-v1 pass) against `claude` CLI in `%USERPROFILE%\.local\bin`, model `claude-opus-4-8` / `haiku`, driving the real `yumi.exe`.
 
 ---
 
@@ -17,7 +17,7 @@ Last verified: 2026-06-25 against `claude` CLI in `%USERPROFILE%\.local\bin`, mo
 |---|---------|--------|----------|
 | 1 | Tauri shell boots; React UI renders in WebView2 | ✅ | `yumi.exe` (debug, embedded UI) launches; OLED UI renders — `yumi_rebuilt_window.png` |
 | 2 | Locate + spawn `claude.exe` (`--output-format stream-json --verbose --include-partial-messages --dangerously-skip-permissions [--resume] -p … --model …`) | ✅ | Live round-trips; spawn args in `src-tauri/src/claude/spawner.rs` |
-| 3 | Non-lossy `stream_parser` (system/assistant/user/stream_event/result/rate_limit/error → typed events; unknown → `raw`) | ✅ | 23 `cargo test` unit tests against real captured bytes |
+| 3 | Non-lossy `stream_parser` (system/assistant/user/stream_event/result/rate_limit/error → typed events; unknown → `raw`) | ✅ | 27 `cargo test` parser unit tests against real captured bytes |
 | 4 | Chat render: user/assistant text, **thinking blocks**, tool_use/tool_result cards, markdown + code highlighting | ✅ | `yumi_td_10s.png` — thinking block + markdown answer `17 × 23 = **391**` |
 | 5 | Prompt input; send; interrupt/stop; new session/tab | ✅ | Stop→Send button flips; `interrupt_claude` tree-kills via registry |
 | 6 | Tabs/sessions, session list, resume, SQLite persistence (sessions+messages) | ✅ | Sidebar shows persisted prior turns grouped under project; `~/.yumi/yumi.db` |
@@ -30,13 +30,13 @@ Last verified: 2026-06-25 against `claude` CLI in `%USERPROFILE%\.local\bin`, mo
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Rate-limit display (5h / 7d pills) | 🟢 | `get_usage_limits`; pills render; in-stream `rate_limit_event` also parsed |
-| Git panel (status / diff) | 🟢 | `git_status`, `git_diff` commands + `GitPanel.tsx` |
+| Rate-limit display (5h / 7d pills) | 🟢 | **Honest + live.** There is no reliable LOCAL source of 5h/7d rolling-window percentages (`~/.claude/stats-cache.json` is historical token stats, no window %), so `get_usage_limits` returns an honestly-inert state (`live:false`) and the pills render **greyed `—` with an "unavailable" tooltip** — never a fake number. The CLI's in-stream `rate_limit_event` (`{rate_limit_info:{status,resetsAt,rateLimitType}}`) IS wired through `store._onEvent` → the pills light up live (status + window + reset) when Claude reports a limit. The backend forwards that event even though it trails `end_turn` (pid-gated). **Verified in the real GUI:** pills greyed `5h —`/`7d —` at boot (`docs/evidence/v1-boot.png`); after a real turn the 5h pill lit **`5h ok`** (window reported `allowed`) while 7d stayed `—` (`docs/evidence/v1-ratelimit-live.png`). |
+| Git panel (status / diff) | ✅ | `git_status`, `git_diff` commands + `GitPanel.tsx`. Verified in the GUI: shows branch + real staged/unstaged/untracked lists (`docs/evidence/v1-git-panel.png`). |
 | Files panel + @-mentions + folder nav | 🟢 | `list_directory`, `read_text_file`, `FilesPanel.tsx`, `MentionPopup.tsx` |
 | Command palette (slash commands) | 🟢 | `CommandPalette.tsx` |
-| Context/token bar (tokens %, model) | 🟢 | `TokenBar.tsx`; usage now surfaced from `message_delta` (e.g. `8.6k / 200k 4%`) |
+| Context/token bar (tokens %, model) | ✅ | **Live mid-stream + dynamic window.** Fills live from the `message_start` usage snapshot (not only end-of-turn), and counts the cache tokens (`input + cache_read + cache_creation + output`) so a resumed turn reads its true occupancy. The window is parametrized per active model (`lib/models.ts` — Claude 200K, Gemini/1M variants 1M, default 200K), killing the hardcoded-200K bug. Verified driving `yumi.exe`: a turn filled the bar `0 → 51.7k / 200k (26%)` (`docs/evidence/v1-stream-done.png`). |
 | Project picker + recent projects | 🟢 | `ProjectPicker.tsx`; `recent_projects` JSON in settings |
-| yumi-plugin reproduced (4 agents + 5 commands + guard) | 🟢 | `resources/yumi-plugin/**` (architect/explorer/guardian/implementer; commit/compact/implement/init/plan) |
+| yumi-plugin reproduced (4 agents + 8 commands + guard) | 🟢 | `resources/yumi-plugin/**` (architect/explorer/guardian/implementer; commit/compact/implement/init/plan/research/review/swarm) |
 | Analytics dashboard (totals, by-model, by-date) | 🟢 | UI + `db_get_analytics` read path; `record_analytics` is now **wired** — the spawner records a usage row (model, input/output tokens, cost) from each turn's drained `result` line, so the dashboard shows real totals. Covered by `db.rs` unit tests (`record_and_aggregate_analytics`, `empty_analytics_is_zeroed`). |
 
 ## P2 — parity-noted, scoped/stub/omitted
@@ -45,7 +45,7 @@ Last verified: 2026-06-25 against `claude` CLI in `%USERPROFILE%\.local\bin`, mo
 |---------|--------|-------|
 | Per-message USD cost footer | 🟢 | **Recovered** without giving up responsiveness. The UI still finalizes on `end_turn` (~10s); when the lingering process's `result` line is drained, the backend emits a side-channel `claude-cost {sessionId, cost, durationMs}` that the store attaches to the finalized message's footer. Emission is gated on the turn's process still owning the session (pid-aware `is_current`), so a late cost can't land on a newer turn. (Not persisted to the DB — the message schema carries no cost column — so it shows live but not after a reload-from-history.) |
 | BASH-MONITOR live tail (Rust tails `%TEMP%\yumi-bash-<sid>.log` → live terminal in tool card) | ✅ | **Done + verified.** Opt-in (`settings.bashMonitor`, default off). When on, the spawner writes a temp `--mcp-config` registering `yumi-mcp-bash.cjs` (with the session id + stream file) and passes `--disallowedTools Bash` so claude routes shell through `mcp__yumi-bash__RunBash`; `spawn_monitor` tails the stream file → `bash-output` → the running tool card's `live` field. Verified live: a `for i in 1..6; do echo tick-$i; sleep 1` loop streamed `tick-1..4` into the tool card's LIVE pane mid-run (`docs/evidence/p2-bashmon-livetail.png`). Resolves the prior "real blocker". |
-| Multi-provider (Gemini/GPT/Kiro shim) | 🟢 | Provider abstraction (`provider.rs`): the spawner selects the binary + arg shape per `settings.provider` (Settings UI picker drives a provider-aware model list). **Claude is the verified path**; Gemini/Codex/Kiro locate their own CLI on PATH with a best-effort, unverified arg mapping (mirrors Yume's shim design). |
+| Multi-provider (Gemini/GPT/Kiro via router) | 🟢 | **Real, via `ANTHROPIC_BASE_URL` injection** (the convergent OSS pattern; the old "spawn the gemini/codex binary directly" path — which could never emit Claude stream-json — is gone). EVERY provider drives the SAME `claude` binary + stream-json parser; a non-Claude provider is realized by pointing that process at a router (claude-code-router / LiteLLM / OpenRouter) via `settings.routerBaseUrl`. A non-Claude provider with no router URL returns a **clear error**, never a fake success. Claude is the fully-verified path; the routing mechanism is verified — a spawned `claude` with `ANTHROPIC_BASE_URL` set sent its real `POST /v1/messages` to a local mock (`docs/evidence/v1-provider-routing.md`). Unit-tested (`provider::tests`). |
 | 6-pane split grid (3×2, F7/F8) | ✅ | **Done + verified.** F7 adds a pane, F8 removes; up to 6 panes in a CSS grid, each a full `ChatPane(tabId)` (own header/messages/composer), click-to-activate with an active-border highlight. Verified F7×2 → 3 live panes (`docs/evidence/p2-split.png`). |
 | History rollback UI | ✅ | **Done.** A rewind affordance on every user message truncates the conversation to that turn and reloads the prompt into the composer for edit/resend (`store.rollbackTo`), then re-persists. |
 | Voice dictation (F5) | 🟢 | **Done.** F5 / a mic button toggles Web-Speech-API dictation (`useDictation`); interim + final transcripts append to the active pane's composer, with a live "Listening…" indicator. Degrades gracefully (button disabled) where the WebView2 has no speech backend. |
@@ -94,9 +94,38 @@ Last verified: 2026-06-25 against `claude` CLI in `%USERPROFILE%\.local\bin`, mo
    reused the session id. Net: the dashboard and cost footer are populated with accurate data,
    and the chat stays as responsive as before.
 
+5. **Sidecars survive bundling (`resource_dir` resolution).** The `.cjs` sidecars
+   (`yumi-mcp-bash.cjs`, `thinking-proxy.cjs`) and the `yumi-plugin/` tree are declared
+   as Tauri `resources` in `tauri.conf.json`, and resolved at runtime by
+   `claude::resources::resolve_resource` — which tries `app.path().resource_dir()/resources/<name>`
+   FIRST and only falls back to the dev-layout ancestor-walk. The runtime no longer
+   *depends* on the walk. Verified: `cargo build` stages them to
+   `target/debug/resources/` so `resource_dir()` resolves even in the `--no-bundle`
+   dev build. (Producing the NSIS installer itself is out of scope — the toolchain
+   isn't installed — but the resource-resolution path is implemented + confirmed.)
+
+6. **Robustness checklist (research §3.5) addressed.**
+   - *Polymorphic `tool_result.content`* — the parser flattens string / array /
+     object (`{content}`/`{output}`/`{text}`) forms (tested).
+   - *Subagent isolation* — a non-null top-level `parent_tool_use_id` makes the
+     whole line `raw`, so a subagent's `end_turn` can never finalize/pollute the
+     main turn (tested).
+   - */compact mints a new session id mid-stream* — the parser surfaces each
+     `system/init` session id; `store._onSessionId` rebinds the resume id (tested
+     at the parser; store binding is the existing `claude-session-id` path).
+   - *Panic-safe process guard* — every spawned child (the `claude` turns AND the
+     thinking-proxy node process) is tracked in a process-wide set; a panic hook
+     tree-kills them on a host panic, and the Tauri `RunEvent::Exit` handler kills
+     them on normal teardown — so none leak (`process::guard`, tested + GUI-verified
+     the proxy dies on window close).
+   - *DB pruning* — `Db::prune` caps stored sessions (newest 500) and ages out
+     analytics (>1y) at startup, bounding growth for long-lived installs (tested).
+
 ## Verification gates (all green)
 
-- `cargo test` — 25 parser/registry/db unit tests pass (was 23; +2 analytics round-trip tests).
+- `cargo test` — 38 parser/provider/registry/guard/db/resources unit tests pass
+  (was 25; +13 for the v1 work: message_start usage, subagent isolation, polymorphic
+  tool_result, provider env-injection ×4, resource-walk fallback, process guard, DB prune).
 - `node resources/tests/mcp_server.test.mjs` — 12/12 (initialize, tools/list = 5 tools, RunBash output + cwd tracking, background-proc lifecycle).
 - `tsc && vite build` — 0 errors. `npx tauri build --debug --no-bundle` — builds `yumi.exe`.
 - Real GUI round-trip: typed prompt → spawn → streamed thinking block + markdown answer → finalized to Send arrow → persisted to sidebar. Screenshots in `C:\dev\yume-test\yumi_*.png`.

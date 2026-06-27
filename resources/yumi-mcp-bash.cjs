@@ -75,7 +75,7 @@ let activeForegroundProc = null;
 let hasPython3Pty = false;
 if (!IS_WINDOWS) {
   try {
-    execSync('python3 -c "import pty"', { stdio: 'ignore', timeout: 3000 });
+    execSync('python3 -c "import pty"', { stdio: 'ignore', timeout: 3000, windowsHide: true });
     hasPython3Pty = true;
   } catch {
     // python3 or pty module not available — try fallbacks below
@@ -96,7 +96,7 @@ let stdbufCmd = 'stdbuf';
 if (!IS_WINDOWS && !hasPython3Pty && !hasScriptPty) {
   for (const cmd of ['stdbuf', 'gstdbuf']) {
     try {
-      execSync(`${cmd} --version`, { stdio: 'ignore', timeout: 3000 });
+      execSync(`${cmd} --version`, { stdio: 'ignore', timeout: 3000, windowsHide: true });
       hasStdbuf = true;
       stdbufCmd = cmd;
       break;
@@ -667,7 +667,7 @@ let _cachedPowerShell = undefined;
 function findPowerShell() {
   if (_cachedPowerShell !== undefined) return _cachedPowerShell;
   try {
-    require('child_process').execSync('pwsh -Version', { stdio: 'pipe', timeout: 5000 });
+    require('child_process').execSync('pwsh -Version', { stdio: 'pipe', timeout: 5000, windowsHide: true });
     _cachedPowerShell = 'pwsh';
     return _cachedPowerShell;
   } catch {}
@@ -1031,7 +1031,9 @@ function executeCommand(command, timeout = DEFAULT_TIMEOUT, runInBackground = fa
             : ['ignore', bgOutputFd !== null ? bgOutputFd : 'ignore', bgOutputFd !== null ? bgOutputFd : 'ignore'])
         : [fgStdin, 'pipe', 'pipe'],
       detached,
-      windowsHide: IS_WINDOWS && runInBackground
+      // Hide the console window for EVERY shell spawn on Windows, not just
+      // background ones — otherwise each foreground command flashes a terminal.
+      windowsHide: IS_WINDOWS
     });
 
     if (bgOutputFd !== null) {

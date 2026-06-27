@@ -1,0 +1,229 @@
+/* =============================================================================
+   Yume identity layer — the full Yume *design language*, scoped to the Yume theme.
+
+   theme.css maps COLORS only. This file ports the rest of the identity so the UI
+   reads as Yume, not recolored-yumi. Values are mirrored from the design system's
+   own preview/index.html (the source of truth for how each component is built
+   from tokens): buttons 6px/14px @ r5, badges r3 surface-3, composer r7 surface-3,
+   active tab = surface-2 + inset accent underline, overlays = 1px ACCENT border,
+   status bar dense+muted, 100% monospace, 12px / tight line-height, lowercase
+   labels.
+
+   Every selector is prefixed [data-theme="yume"] → the other six themes are
+   physically untouched. Imported AFTER styles.css so it wins the cascade.
+   ============================================================================= */
+
+/* ── Tokens: monospace face everywhere + Yume's tight radii. yumi components
+   already consume these vars, so this propagates broadly from one place. ── */
+[data-theme="yume"] {
+  --font-sans: var(--yume-font-sans);   /* Fira Code — same face as mono */
+  --font-mono: var(--yume-font-mono);
+  --radius-sm: 5px;   /* buttons · inputs · tabs */
+  --radius: 7px;      /* composer · cards · popovers */
+  --radius-lg: 10px;  /* modals */
+}
+
+/* ── Density: 12px base, tight line-height. Controls don't inherit font. ── */
+[data-theme="yume"] body {
+  font-size: var(--yume-fs-base);   /* 12px */
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme="yume"] button,
+[data-theme="yume"] input,
+[data-theme="yume"] textarea,
+[data-theme="yume"] select,
+[data-theme="yume"] kbd {
+  font-family: var(--yume-font-sans);
+}
+[data-theme="yume"] .md,
+[data-theme="yume"] .assistant-text { line-height: 1.5; }
+
+/* ── Lowercase, muted section headers & labels (Yume house style). ── */
+[data-theme="yume"] .sidebar__title,
+[data-theme="yume"] .settings__heading,
+[data-theme="yume"] .code-block__lang,
+[data-theme="yume"] .palette__empty {
+  text-transform: lowercase;
+  letter-spacing: 0;
+  font-weight: var(--yume-fw-medium);
+}
+
+/* =============================================================================
+   Title bar + tabs
+   ============================================================================= */
+[data-theme="yume"] .topbar {
+  background: var(--yume-surface-0);
+  border-bottom: 1px solid var(--yume-border-subtle);
+}
+[data-theme="yume"] .tab-bar__tab {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  color: var(--yume-text-secondary);
+}
+[data-theme="yume"] .tab-bar__tab.is-active {
+  background: var(--yume-surface-2);
+  color: var(--yume-text-primary);
+  border-color: var(--yume-border-subtle);
+  box-shadow: inset 0 -2px 0 var(--yume-accent);   /* phosphor-lime cue */
+}
+[data-theme="yume"] .tab-bar__new { color: var(--yume-accent); }
+[data-theme="yume"] .topbar__icon-btn.is-active {
+  color: var(--yume-accent);
+  background: color-mix(in srgb, var(--yume-accent) 14%, transparent);
+}
+
+/* =============================================================================
+   Messages · prose · code
+   ============================================================================= */
+[data-theme="yume"] .msg--assistant__avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--yume-radius-xs);
+}
+/* bold prose lifts toward accent (Yume convention) */
+[data-theme="yume"] .md strong,
+[data-theme="yume"] .assistant-text strong {
+  color: var(--yume-accent);
+  font-weight: var(--yume-fw-bold);
+}
+[data-theme="yume"] .meta-pill {
+  border-radius: var(--yume-radius-xs);
+  background: var(--yume-surface-3);
+  color: var(--yume-text-secondary);
+  border: 1px solid var(--yume-border-subtle);
+  padding: 1px 7px;
+  font-family: var(--yume-font-mono);
+}
+[data-theme="yume"] .code-block {
+  border-radius: var(--yume-radius-sm);
+  border: 1px solid var(--yume-border-subtle);
+}
+[data-theme="yume"] .code-block__bar { background: var(--yume-surface-2); }
+[data-theme="yume"] .code-block__pre,
+[data-theme="yume"] .code-block__pre code,
+[data-theme="yume"] .tool-card__pre--live,
+[data-theme="yume"] .md-inline-code { font-family: var(--yume-font-mono); }
+[data-theme="yume"] .md-inline-code {
+  background: var(--yume-surface-3);
+  border-radius: var(--yume-radius-xs);
+  color: var(--yume-text-primary);
+}
+
+/* =============================================================================
+   Composer (the "message yume…" well)
+   ============================================================================= */
+[data-theme="yume"] .prompt-input__box {
+  background: var(--yume-surface-3);
+  border: 1px solid var(--yume-border-subtle);
+  border-radius: var(--yume-radius-md);
+}
+[data-theme="yume"] .prompt-input__box:focus-within {
+  border-color: var(--yume-accent);
+  box-shadow: var(--yume-shadow-focus);
+}
+[data-theme="yume"] .prompt-input__textarea {
+  font-family: var(--yume-font-sans);
+  font-size: var(--yume-fs-base);
+}
+/* primary/send + danger/stop: compact filled, accent-contrast glyph */
+[data-theme="yume"] .prompt-input__btn--send {
+  border-radius: var(--yume-radius-sm);
+}
+[data-theme="yume"] .prompt-input__model {
+  font-family: var(--yume-font-mono);
+  color: var(--yume-text-muted);
+}
+
+/* =============================================================================
+   Sidebar
+   ============================================================================= */
+[data-theme="yume"] .sidebar { background: var(--yume-surface-0); }
+[data-theme="yume"] .sidebar__search-input {
+  background: var(--yume-surface-3);
+  border: 1px solid var(--yume-border-subtle);
+  border-radius: var(--yume-radius-sm);
+}
+[data-theme="yume"] .sidebar__search-input:focus {
+  border-color: var(--yume-accent);
+  box-shadow: var(--yume-shadow-focus);
+}
+[data-theme="yume"] .sidebar__session.is-active {
+  background: var(--yume-selection-row);
+}
+[data-theme="yume"] .sidebar__session.is-active .sidebar__session-title {
+  color: var(--yume-accent);
+}
+
+/* =============================================================================
+   Buttons / badges / inputs / toggles
+   ============================================================================= */
+/* accent-filled primaries get medium weight + accent-contrast (already --on-accent) */
+[data-theme="yume"] .project-picker__browse,
+[data-theme="yume"] .agents-panel__run,
+[data-theme="yume"] .prompt-input__btn--send {
+  font-weight: var(--yume-fw-medium);
+}
+/* kbd / shortcut chips */
+[data-theme="yume"] kbd,
+[data-theme="yume"] .settings__kbd,
+[data-theme="yume"] .palette__item-hint {
+  background: var(--yume-surface-3);
+  border: 1px solid var(--yume-border-subtle);
+  border-radius: var(--yume-radius-xs);
+  color: var(--yume-text-secondary);
+  font-family: var(--yume-font-mono);
+}
+/* toggle "on" already accent via --accent; ensure thumb is accent-contrast */
+[data-theme="yume"] .switch.is-on .switch__thumb { background: var(--yume-accent-contrast); }
+
+/* =============================================================================
+   Overlays — Yume's signature: centered card with a 1px ACCENT border over a
+   dimmed scrim. The command palette especially.
+   ============================================================================= */
+[data-theme="yume"] .overlay-backdrop { background: var(--yume-overlay-scrim); }
+[data-theme="yume"] .overlay-card,
+[data-theme="yume"] .palette {
+  background: var(--yume-surface-1);
+  border: 1px solid var(--yume-accent);
+  border-radius: var(--yume-radius-md);
+  box-shadow: var(--yume-shadow-popover);
+}
+[data-theme="yume"] .palette__input {
+  background: var(--yume-surface-3);
+  border: 1px solid var(--yume-accent);
+  border-radius: var(--yume-radius-sm);
+}
+[data-theme="yume"] .palette__item.is-active {
+  background: var(--yume-selection-row);
+  color: var(--yume-accent);
+}
+[data-theme="yume"] .palette__item.is-active .palette__item-icon,
+[data-theme="yume"] .palette__item.is-active .palette__item-title {
+  color: var(--yume-accent);
+}
+
+/* =============================================================================
+   Status / footer chips + scrollbars
+   ============================================================================= */
+[data-theme="yume"] .prompt-input__footer { color: var(--yume-text-muted); }
+[data-theme="yume"] *::-webkit-scrollbar { width: 8px; height: 8px; }
+[data-theme="yume"] *::-webkit-scrollbar-thumb {
+  background: var(--yume-scrollbar-thumb);
+  border-radius: var(--yume-radius-xs);
+}
+
+/* =============================================================================
+   Density — Yume packs tighter than yumi's default chat spacing.
+   ============================================================================= */
+[data-theme="yume"] .msg-list__inner { padding: 16px 24px 12px; gap: 12px; }
+[data-theme="yume"] .msg--assistant { gap: 10px; }
+[data-theme="yume"] .msg--assistant__body { gap: 8px; }
+[data-theme="yume"] .prompt-input { padding: 8px 0 10px; }
+[data-theme="yume"] .sidebar__session { padding: 5px 8px; }
+/* user bubble: smaller, Yume-radius corners instead of the big 14px pill */
+[data-theme="yume"] .msg--user__bubble {
+  border-radius: var(--yume-radius-md);
+  border-top-right-radius: var(--yume-radius-xs);
+  padding: 8px 12px;
+}

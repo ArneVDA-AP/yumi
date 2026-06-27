@@ -39,7 +39,7 @@ impl Default for Settings {
             provider: default_provider(),
             router_base_url: String::new(),
             model: "claude-opus-4-8".to_string(),
-            theme: "oled".to_string(),
+            theme: "yume".to_string(),
             vim_mode: false,
             thinking: true,
             show_rate_limit: true,

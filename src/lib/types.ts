@@ -89,7 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: "claude",
   routerBaseUrl: "",
   model: "claude-opus-4-8",
-  theme: "oled",
+  theme: "yume",
   vimMode: false,
   thinking: true,
   showRateLimit: true,
